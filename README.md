@@ -139,11 +139,11 @@ map[string]map[string]TradingPair // ["ETH"]["USDC"]TradingPair
 ### Step 1: Build Virtual Orderbook
 
 1. **Find all paths** from base to quote currency (e.g., KNC→ETH)
-2. **Generate price combinations** for each path:
+2. **Generate all route candidates** with price combinations for each path:
    - Path 1: KNC→USDT→ETH → [1.1×1/360, 1.2×1/360, 1.1×1/365, 1.2×1/365]
    - Path 2: KNC→ETH → [0.0031, 0.0032]
-3. **Calculate effective price** = product of all prices in path
-4. **Calculate depth** = minimum volume across all pairs in path
+3. **Sort candidates by price** (best price first)
+4. **Apply greedy volume tracking**: for each candidate, calculate max usable volume considering remaining volumes, then deduct used volumes to prevent double-counting
 5. **Sort and merge** orders with same price
 
 #### Example Virtual Orderbook
@@ -163,3 +163,8 @@ KNC ETH
 1. **Walk Orderbook**: Start from best price level (lowest for ask, highest for bid)
 2. **For each level**: Execute `min(target_amount, level_amount)` and track total cost
 3. **Continue**: Move to next level until target amount is fulfilled
+
+## Implementation Limits
+- **Reduced Complexity**: Fewer levels = faster computation and less memory usage and prevents exploring extremely long routes that are rarely optimal
+- **MAX_LEVELS_PER_PAIR = 5**: Limit number of order levels per trading pair to reduce complexity
+- **MAX_PATH_DEPTH = 5**: Limit maximum path length to prevent exponential growth in route combinations

@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+const MAX_LEVELS_PER_PAIR = 5
+const MAX_PATH_DEPTH = 5
+
 type Level struct {
 	Price  float64
 	Amount float64
@@ -27,7 +30,7 @@ type VirtualLevel struct {
 	Price       float64
 	Amount      float64
 	Route       []string
-	LevelPrices []float64 // Giá của từng level trong mỗi pair của route
+	LevelPrices []float64 // Price of each level in each pair of the route
 }
 
 type VirtualTradingPair struct {
@@ -35,13 +38,6 @@ type VirtualTradingPair struct {
 	Quote     string
 	AskOrders []VirtualLevel
 	BidOrders []VirtualLevel
-}
-
-type BestRoute []struct {
-	Route       []string
-	Price       float64
-	Amount      float64
-	LevelPrices []float64 // Giá của từng level trong mỗi pair của route
 }
 
 type PriceVolumeCombo struct {
@@ -58,12 +54,19 @@ func buildGraph(pairs []TradingPair) Graph {
 		if graph[pair.Quote] == nil {
 			graph[pair.Quote] = make(map[string]TradingPair)
 		}
-		graph[pair.Base][pair.Quote] = pair
+		limitedAskOrders := pair.AskOrders[:min(len(pair.AskOrders), MAX_LEVELS_PER_PAIR)]
+		limitedBidOrders := pair.BidOrders[:min(len(pair.BidOrders), MAX_LEVELS_PER_PAIR)]
+		graph[pair.Base][pair.Quote] = TradingPair{
+			Base:      pair.Base,
+			Quote:     pair.Quote,
+			AskOrders: limitedAskOrders,
+			BidOrders: limitedBidOrders,
+		}
 		reversePair := TradingPair{
 			Base:      pair.Quote,
 			Quote:     pair.Base,
-			AskOrders: invertOrders(pair.BidOrders),
-			BidOrders: invertOrders(pair.AskOrders),
+			AskOrders: invertOrders(limitedBidOrders),
+			BidOrders: invertOrders(limitedAskOrders),
 		}
 		graph[pair.Quote][pair.Base] = reversePair
 	}
@@ -138,7 +141,7 @@ func buildVirtualOrderbook(graph Graph, baseCurrency, quoteCurrency string) Virt
 		AskOrders: []VirtualLevel{},
 		BidOrders: []VirtualLevel{},
 	}
-	paths := findAllPaths(graph, baseCurrency, quoteCurrency, 5)
+	paths := findAllPaths(graph, baseCurrency, quoteCurrency, MAX_PATH_DEPTH)
 	fmt.Printf("Found %d paths for %s->%s\n: %v\n", len(paths), baseCurrency, quoteCurrency, paths)
 	for _, path := range paths {
 		askOrders := calculateOrdersFromPath(graph, path, true)
@@ -178,7 +181,7 @@ func calculateOrdersFromPath(graph Graph, path []string, isAsk bool) []VirtualLe
 				Price:       effectivePrice,
 				Amount:      combo.depth,
 				Route:       truePath,
-				LevelPrices: combo.prices, // Lưu giá của từng level
+				LevelPrices: combo.prices, // save level prices for each pair in the route
 			})
 		}
 	}
@@ -374,20 +377,20 @@ func mergeVirtualLevels(levels []VirtualLevel) []VirtualLevel {
 	return merged
 }
 
-func executeOnVirtualOrderbook(virtualPair VirtualTradingPair, targetAmount float64) (BestRoute, BestRoute) {
+func executeOnVirtualOrderbook(virtualPair VirtualTradingPair, targetAmount float64) ([]VirtualLevel, []VirtualLevel) {
 	bestAskRoute := findBestRouteFromVirtualOrderbook(virtualPair.AskOrders, targetAmount, true)
 	bestBidRoute := findBestRouteFromVirtualOrderbook(virtualPair.BidOrders, targetAmount, false)
 
 	return bestAskRoute, bestBidRoute
 }
 
-func findBestRouteFromVirtualOrderbook(levels []VirtualLevel, targetAmount float64, isAsk bool) BestRoute {
+func findBestRouteFromVirtualOrderbook(levels []VirtualLevel, targetAmount float64, isAsk bool) []VirtualLevel {
 	if len(levels) == 0 {
-		return BestRoute{}
+		return []VirtualLevel{}
 	}
 
-	var bestRoute BestRoute
-	bestRoute = make(BestRoute, 0)
+	var bestRoute []VirtualLevel
+	bestRoute = make([]VirtualLevel, 0)
 
 	remainingAmount := targetAmount
 	var totalCost float64
@@ -423,12 +426,7 @@ func findBestRouteFromVirtualOrderbook(levels []VirtualLevel, targetAmount float
 		}
 
 		remainingAmount -= executed
-		bestRoute = append(bestRoute, struct {
-			Route       []string
-			Price       float64
-			Amount      float64
-			LevelPrices []float64
-		}{
+		bestRoute = append(bestRoute, VirtualLevel{
 			Route:       level.Route,
 			Price:       level.Price,
 			Amount:      executed,
@@ -468,7 +466,7 @@ func printVirtualOrderbook(virtualPair VirtualTradingPair) {
 	}
 }
 
-func printBestRouteOutput(bestBidRoute, bestAskRoute BestRoute) {
+func printBestRouteOutput(bestBidRoute, bestAskRoute []VirtualLevel) {
 	fmt.Println("=== Best Routes Found ===")
 	fmt.Println("ASK Routes:")
 	if len(bestAskRoute) > 0 {
