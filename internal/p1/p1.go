@@ -21,6 +21,8 @@ type TradingRoute struct {
 	Price float64
 }
 
+type Graph map[string]map[string]TradingPair
+
 func FindOptimalTradingRoutes(baseCurrency, quoteCurrency string, pairs []TradingPair) (TradingRoute, TradingRoute) {
 	graph := buildGraph(pairs)
 	bestAskRoute := findBestRoute(graph, baseCurrency, quoteCurrency, true)
@@ -28,8 +30,8 @@ func FindOptimalTradingRoutes(baseCurrency, quoteCurrency string, pairs []Tradin
 	return bestAskRoute, bestBidRoute
 }
 
-func buildGraph(pairs []TradingPair) map[string]map[string]TradingPair {
-	graph := make(map[string]map[string]TradingPair)
+func buildGraph(pairs []TradingPair) Graph {
+	graph := make(Graph)
 
 	for _, pair := range pairs {
 		if graph[pair.Base] == nil {
@@ -60,13 +62,13 @@ func buildGraph(pairs []TradingPair) map[string]map[string]TradingPair {
 	return graph
 }
 
-func findBestRoute(graph map[string]map[string]TradingPair, start, end string, isAsk bool) TradingRoute {
+func findBestRoute(graph Graph, start, end string, isAsk bool) TradingRoute {
 	return bellmanFordWithLog(graph, start, end, isAsk)
 }
 
-func dijkstraWithMultiplication(graph map[string]map[string]TradingPair, start, end string, isAsk bool) TradingRoute {
+func dijkstraWithMultiplication(graph Graph, start, end string, isAsk bool) TradingRoute {
 	distances := make(map[string]float64)
-	predecessors := make(map[string]string)
+	tracer := make(map[string]string)
 	visited := make(map[string]bool)
 	for node := range graph {
 		distances[node] = math.Inf(1)
@@ -100,7 +102,7 @@ func dijkstraWithMultiplication(graph map[string]map[string]TradingPair, start, 
 			newDist := distances[current] * weight
 			if newDist < distances[neighbor] {
 				distances[neighbor] = newDist
-				predecessors[neighbor] = current
+				tracer[neighbor] = current
 			}
 		}
 	}
@@ -116,7 +118,7 @@ func dijkstraWithMultiplication(graph map[string]map[string]TradingPair, start, 
 	current := end
 	for current != "" {
 		path = append([]string{current}, path...)
-		current = predecessors[current]
+		current = tracer[current]
 	}
 	return TradingRoute{
 		Route: path,
@@ -124,9 +126,9 @@ func dijkstraWithMultiplication(graph map[string]map[string]TradingPair, start, 
 	}
 }
 
-func bellmanFordWithLog(graph map[string]map[string]TradingPair, start, end string, isAsk bool) TradingRoute {
+func bellmanFordWithLog(graph Graph, start, end string, isAsk bool) TradingRoute {
 	distances := make(map[string]float64)
-	predecessors := make(map[string]string)
+	tracer := make(map[string]string)
 	for node := range graph {
 		distances[node] = math.Inf(1)
 	}
@@ -144,7 +146,7 @@ func bellmanFordWithLog(graph map[string]map[string]TradingPair, start, end stri
 				logWeight := math.Log(weight)
 				if distances[u] != math.Inf(1) && distances[u]+logWeight < distances[v] {
 					distances[v] = distances[u] + logWeight
-					predecessors[v] = u
+					tracer[v] = u
 				}
 			}
 		}
@@ -177,15 +179,16 @@ func bellmanFordWithLog(graph map[string]map[string]TradingPair, start, end stri
 	path := []string{}
 	current := end
 	pathLength := 0
-	for current != "" && pathLength < 2*len(graph) { // Prevent infinite loop
+	for current != "" && pathLength < len(graph) { // Prevent infinite loop
 		path = append([]string{current}, path...)
-		current = predecessors[current]
+		current = tracer[current]
 		pathLength++
 	}
 
 	var finalPrice float64
 	if isAsk {
 		finalPrice = math.Exp(distances[end])
+		// NOTE: Reverse the path to get the correct route
 		for i := 0; i < len(path)/2; i++ {
 			path[i], path[len(path)-i-1] = path[len(path)-i-1], path[i]
 		}
