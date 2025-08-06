@@ -24,9 +24,10 @@ type TradingPair struct {
 type Graph map[string]map[string]TradingPair
 
 type VirtualLevel struct {
-	Price  float64
-	Amount float64
-	Route  []string
+	Price       float64
+	Amount      float64
+	Route       []string
+	LevelPrices []float64 // Giá của từng level trong mỗi pair của route
 }
 
 type VirtualTradingPair struct {
@@ -37,9 +38,10 @@ type VirtualTradingPair struct {
 }
 
 type BestRoute []struct {
-	Route  []string
-	Price  float64
-	Amount float64
+	Route       []string
+	Price       float64
+	Amount      float64
+	LevelPrices []float64 // Giá của từng level trong mỗi pair của route
 }
 
 type PriceVolumeCombo struct {
@@ -82,13 +84,13 @@ func buildGraph(pairs []TradingPair) Graph {
 	return graph
 }
 
-func invertOrders(orders []Level) []Level {
+func invertOrders(levels []Level) []Level {
 	var invertedOrders []Level
-	for _, order := range orders {
-		if order.Price > 0 {
+	for _, level := range levels {
+		if level.Price > 0 {
 			invertedOrders = append(invertedOrders, Level{
-				Price:  1.0 / order.Price,
-				Amount: order.Amount * order.Price,
+				Price:  1.0 / level.Price,
+				Amount: level.Amount * level.Price,
 			})
 		}
 	}
@@ -96,33 +98,37 @@ func invertOrders(orders []Level) []Level {
 }
 
 func findAllPaths(graph Graph, start, end string, maxDepth int) [][]string {
-	var allPaths [][]string
 	visited := make(map[string]bool)
 	startPath := []string{start}
-	findPathsRecursive(graph, start, end, visited, startPath, &allPaths, maxDepth)
-	return allPaths
+	return findPathsRecursive(graph, start, end, visited, startPath, maxDepth)
 }
 
-func findPathsRecursive(graph Graph, currentToken, targetToken string, visited map[string]bool, currentPath []string, foundPaths *[][]string, maxDepth int) {
+func findPathsRecursive(graph Graph, currentToken, targetToken string, visited map[string]bool, currentPath []string, maxDepth int) [][]string {
+	var allPaths [][]string
 	if len(currentPath) > maxDepth {
-		return
+		return allPaths
 	}
 	if currentToken == targetToken && len(currentPath) > 1 {
 		pathCopy := make([]string, len(currentPath))
 		copy(pathCopy, currentPath)
-		*foundPaths = append(*foundPaths, pathCopy)
-		return
+		allPaths = append(allPaths, pathCopy)
+		return allPaths
 	}
+
 	visited[currentToken] = true
 	for nextToken := range graph[currentToken] {
 		if !visited[nextToken] {
 			newPath := make([]string, len(currentPath))
 			copy(newPath, currentPath)
 			newPath = append(newPath, nextToken)
-			findPathsRecursive(graph, nextToken, targetToken, visited, newPath, foundPaths, maxDepth)
+
+			pathsFromNext := findPathsRecursive(graph, nextToken, targetToken, visited, newPath, maxDepth)
+			allPaths = append(allPaths, pathsFromNext...)
 		}
 	}
+
 	visited[currentToken] = false
+	return allPaths
 }
 
 func buildVirtualOrderbook(graph Graph, baseCurrency, quoteCurrency string) VirtualTradingPair {
@@ -140,10 +146,10 @@ func buildVirtualOrderbook(graph Graph, baseCurrency, quoteCurrency string) Virt
 		virtualPair.AskOrders = append(virtualPair.AskOrders, askOrders...)
 		virtualPair.BidOrders = append(virtualPair.BidOrders, bidOrders...)
 	}
-	sortVirtualOrders(&virtualPair.AskOrders, true)
-	sortVirtualOrders(&virtualPair.BidOrders, false)
-	virtualPair.AskOrders = mergeVirtualOrders(virtualPair.AskOrders)
-	virtualPair.BidOrders = mergeVirtualOrders(virtualPair.BidOrders)
+	sortVirtualLevels(&virtualPair.AskOrders, true)
+	sortVirtualLevels(&virtualPair.BidOrders, false)
+	virtualPair.AskOrders = mergeVirtualLevels(virtualPair.AskOrders)
+	virtualPair.BidOrders = mergeVirtualLevels(virtualPair.BidOrders)
 	return virtualPair
 }
 
@@ -169,9 +175,10 @@ func calculateOrdersFromPath(graph Graph, path []string, isAsk bool) []VirtualLe
 		}
 		if combo.depth > 0 {
 			levels = append(levels, VirtualLevel{
-				Price:  effectivePrice,
-				Amount: combo.depth,
-				Route:  truePath,
+				Price:       effectivePrice,
+				Amount:      combo.depth,
+				Route:       truePath,
+				LevelPrices: combo.prices, // Lưu giá của từng level
 			})
 		}
 	}
@@ -319,48 +326,48 @@ func sortCandidatesByPrice(candidates []RouteCandidate, isAsk bool) {
 }
 
 // NOTE: may be just need merge
-func sortVirtualOrders(orders *[]VirtualLevel, isAskOrders bool) {
-	orderList := *orders
-	totalOrders := len(orderList)
-	if isAskOrders {
-		for i := 0; i < totalOrders-1; i++ {
-			for j := i + 1; j < totalOrders; j++ {
-				firstOrderPrice := orderList[i].Price
-				secondOrderPrice := orderList[j].Price
-				if firstOrderPrice > secondOrderPrice {
-					orderList[i], orderList[j] = orderList[j], orderList[i]
+func sortVirtualLevels(levels *[]VirtualLevel, isAsk bool) {
+	levelList := *levels
+	totalLevels := len(levelList)
+	if isAsk {
+		for i := 0; i < totalLevels-1; i++ {
+			for j := i + 1; j < totalLevels; j++ {
+				firstLevelPrice := levelList[i].Price
+				secondLevelPrice := levelList[j].Price
+				if firstLevelPrice > secondLevelPrice {
+					levelList[i], levelList[j] = levelList[j], levelList[i]
 				}
 			}
 		}
 	} else {
-		for i := 0; i < totalOrders-1; i++ {
-			for j := i + 1; j < totalOrders; j++ {
-				firstOrderPrice := orderList[i].Price
-				secondOrderPrice := orderList[j].Price
-				if firstOrderPrice < secondOrderPrice {
-					orderList[i], orderList[j] = orderList[j], orderList[i]
+		for i := 0; i < totalLevels-1; i++ {
+			for j := i + 1; j < totalLevels; j++ {
+				firstLevelPrice := levelList[i].Price
+				secondLevelPrice := levelList[j].Price
+				if firstLevelPrice < secondLevelPrice {
+					levelList[i], levelList[j] = levelList[j], levelList[i]
 				}
 			}
 		}
 	}
 }
 
-func mergeVirtualOrders(orders []VirtualLevel) []VirtualLevel {
-	if len(orders) == 0 {
-		return orders
+func mergeVirtualLevels(levels []VirtualLevel) []VirtualLevel {
+	if len(levels) == 0 {
+		return levels
 	}
 	var merged []VirtualLevel
-	current := orders[0]
-	for i := 1; i < len(orders); i++ {
-		if math.Abs(orders[i].Price-current.Price) < 1e-8 {
+	current := levels[0]
+	for i := 1; i < len(levels); i++ {
+		if math.Abs(levels[i].Price-current.Price) < 1e-8 {
 			// Same price, merge quantities
-			current.Amount += orders[i].Amount
-			if orders[i].Price < current.Price {
-				current.Route = orders[i].Route
+			current.Amount += levels[i].Amount
+			if levels[i].Price < current.Price {
+				current.Route = levels[i].Route
 			}
 		} else {
 			merged = append(merged, current)
-			current = orders[i]
+			current = levels[i]
 		}
 	}
 	merged = append(merged, current)
@@ -374,8 +381,8 @@ func executeOnVirtualOrderbook(virtualPair VirtualTradingPair, targetAmount floa
 	return bestAskRoute, bestBidRoute
 }
 
-func findBestRouteFromVirtualOrderbook(orders []VirtualLevel, targetAmount float64, isAsk bool) BestRoute {
-	if len(orders) == 0 {
+func findBestRouteFromVirtualOrderbook(levels []VirtualLevel, targetAmount float64, isAsk bool) BestRoute {
+	if len(levels) == 0 {
 		return BestRoute{}
 	}
 
@@ -395,37 +402,37 @@ func findBestRouteFromVirtualOrderbook(orders []VirtualLevel, targetAmount float
 	// 		}
 	// 	}(), targetAmount)
 
-	for _, order := range orders {
+	for _, level := range levels {
 		if remainingAmount <= 0 {
 			break
 		}
 
-		executed := math.Min(remainingAmount, order.Amount)
+		executed := math.Min(remainingAmount, level.Amount)
 		executedAmount += executed
 
 		if isAsk {
-			cost := executed * order.Price
+			cost := executed * level.Price
 			totalCost += cost
 			// fmt.Printf("Level %d: %.8f %s at %.8f ETH (Route: %s) - Cost: %.8f ETH\n",
-			// 	i+1, executed, "KNC", order.Price, formatRoute(order.Route), cost)
+			// 	i+1, executed, "KNC", level.Price, formatRoute(level.Route), cost)
 		} else {
-			received := executed * order.Price
+			received := executed * level.Price
 			totalCost += received
 			// fmt.Printf("Level %d: %.8f %s at %.8f ETH (Route: %s) - Received: %.8f ETH\n",
-			// 	i+1, executed, "KNC", order.Price, formatRoute(order.Route), received)
+			// 	i+1, executed, "KNC", level.Price, formatRoute(level.Route), received)
 		}
 
 		remainingAmount -= executed
-
-		// Add this route to the execution list
 		bestRoute = append(bestRoute, struct {
-			Route  []string
-			Price  float64
-			Amount float64
+			Route       []string
+			Price       float64
+			Amount      float64
+			LevelPrices []float64
 		}{
-			Route:  order.Route,
-			Price:  order.Price,
-			Amount: executed,
+			Route:       level.Route,
+			Price:       level.Price,
+			Amount:      executed,
+			LevelPrices: level.LevelPrices,
 		})
 	}
 
@@ -449,13 +456,15 @@ func printVirtualOrderbook(virtualPair VirtualTradingPair) {
 	fmt.Printf("%d\n", len(virtualPair.AskOrders))
 
 	for _, order := range virtualPair.AskOrders {
-		fmt.Printf("%.8f %.0f (%s)\n", order.Price, order.Amount, formatRoute(order.Route))
+		fmt.Printf("%.8f %.0f (%s) [Level Prices: %v]\n",
+			order.Price, order.Amount, formatRoute(order.Route), order.LevelPrices)
 	}
 
 	fmt.Printf("%d\n", len(virtualPair.BidOrders))
 
 	for _, order := range virtualPair.BidOrders {
-		fmt.Printf("%.8f %.0f (%s)\n", order.Price, order.Amount, formatRoute(order.Route))
+		fmt.Printf("%.8f %.0f (%s) [Level Prices: %v]\n",
+			order.Price, order.Amount, formatRoute(order.Route), order.LevelPrices)
 	}
 }
 
@@ -464,8 +473,8 @@ func printBestRouteOutput(bestBidRoute, bestAskRoute BestRoute) {
 	fmt.Println("ASK Routes:")
 	if len(bestAskRoute) > 0 {
 		for i, route := range bestAskRoute {
-			fmt.Printf("  %d. %s (Price: %.8f, Amount: %.8f %s)\n",
-				i+1, formatRoute(route.Route), route.Price, route.Amount, route.Route[len(route.Route)-1])
+			fmt.Printf("  %d. %s (Price: %.8f, Amount: %.8f %s) [Level Prices: %v]\n",
+				i+1, formatRoute(route.Route), route.Price, route.Amount, route.Route[len(route.Route)-1], route.LevelPrices)
 		}
 	} else {
 		fmt.Println("  NO_ROUTE")
@@ -473,8 +482,8 @@ func printBestRouteOutput(bestBidRoute, bestAskRoute BestRoute) {
 	fmt.Println("BID Routes:")
 	if len(bestBidRoute) > 0 {
 		for i, route := range bestBidRoute {
-			fmt.Printf("  %d. %s (Price: %.8f, Amount: %.8f %s)\n",
-				i+1, formatRoute(route.Route), route.Price, route.Amount, route.Route[0])
+			fmt.Printf("  %d. %s (Price: %.8f, Amount: %.8f %s) [Level Prices: %v]\n",
+				i+1, formatRoute(route.Route), route.Price, route.Amount, route.Route[0], route.LevelPrices)
 		}
 	} else {
 		fmt.Println("  NO_ROUTE")
@@ -496,7 +505,7 @@ func parseOrderBook(lines []string, lineIdx *int, orderType, pairBase, pairQuote
 		return nil, fmt.Errorf("invalid %s orders count: %s", orderType, lines[*lineIdx])
 	}
 	*lineIdx++
-	var orders []Level
+	var levels []Level
 	for j := 0; j < count; j++ {
 		if *lineIdx >= len(lines) {
 			return nil, fmt.Errorf("missing %s order %d for pair %s/%s", orderType, j+1, pairBase, pairQuote)
@@ -507,10 +516,10 @@ func parseOrderBook(lines []string, lineIdx *int, orderType, pairBase, pairQuote
 		}
 		price, _ := strconv.ParseFloat(orderParts[0], 64)
 		amount, _ := strconv.ParseFloat(orderParts[1], 64)
-		orders = append(orders, Level{Price: price, Amount: amount})
+		levels = append(levels, Level{Price: price, Amount: amount})
 		*lineIdx++
 	}
-	return orders, nil
+	return levels, nil
 }
 
 func runTestCase(input string) {
@@ -553,12 +562,12 @@ func runTestCase(input string) {
 		lineIdx++
 		askOrders, err := parseOrderBook(lines, &lineIdx, "ask", pairBase, pairQuote)
 		if err != nil {
-			fmt.Printf("Error parsing ask orders: %v\n", err)
+			fmt.Printf("Error parsing ask levels: %v\n", err)
 			return
 		}
 		bidOrders, err := parseOrderBook(lines, &lineIdx, "bid", pairBase, pairQuote)
 		if err != nil {
-			fmt.Printf("Error parsing bid orders: %v\n", err)
+			fmt.Printf("Error parsing bid levels: %v\n", err)
 			return
 		}
 		pair := TradingPair{
@@ -572,9 +581,9 @@ func runTestCase(input string) {
 	graph := buildGraph(pairs)
 	fmt.Printf("Building virtual orderbook for %s/%s...\n", baseCurrency, quoteCurrency)
 	virtualOrderbook := buildVirtualOrderbook(graph, baseCurrency, quoteCurrency)
-	fmt.Println("=== Virtual Orderbook ===")
-	printVirtualOrderbook(virtualOrderbook)
-	fmt.Println("---")
+	// fmt.Println("=== Virtual Orderbook ===")
+	// printVirtualOrderbook(virtualOrderbook)
+	// fmt.Println("---")
 
 	// Execute on virtual orderbook to find best routes
 	fmt.Printf("Executing %.0f %s on virtual orderbook...\n", amount, baseCurrency)
