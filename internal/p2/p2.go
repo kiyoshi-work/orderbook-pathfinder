@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sort"
 )
 
 const MAX_LEVELS_PER_PAIR = 5
@@ -311,48 +312,23 @@ func generateAllRouteCandidates(allHopLevels [][]Level, hopIndex int, currentPri
 }
 
 func sortCandidatesByPrice(candidates []RouteCandidate, isAsk bool) {
-	// NOTE: Simple bubble sort for clarity (can optimize later)
-	n := len(candidates)
-	for i := 0; i < n-1; i++ {
-		for j := i + 1; j < n; j++ {
-			shouldSwap := false
-			if isAsk {
-				shouldSwap = candidates[i].finalPrice > candidates[j].finalPrice
-			} else {
-				shouldSwap = candidates[i].finalPrice < candidates[j].finalPrice
-			}
-			if shouldSwap {
-				candidates[i], candidates[j] = candidates[j], candidates[i]
-			}
+	sort.Slice(candidates, func(i, j int) bool {
+		if isAsk {
+			return candidates[i].finalPrice < candidates[j].finalPrice
 		}
-	}
+		return candidates[i].finalPrice > candidates[j].finalPrice
+	})
 }
 
 // NOTE: may be just need merge
 func sortVirtualLevels(levels *[]VirtualLevel, isAsk bool) {
-	levelList := *levels
-	totalLevels := len(levelList)
-	if isAsk {
-		for i := 0; i < totalLevels-1; i++ {
-			for j := i + 1; j < totalLevels; j++ {
-				firstLevelPrice := levelList[i].Price
-				secondLevelPrice := levelList[j].Price
-				if firstLevelPrice > secondLevelPrice {
-					levelList[i], levelList[j] = levelList[j], levelList[i]
-				}
-			}
-		}
-	} else {
-		for i := 0; i < totalLevels-1; i++ {
-			for j := i + 1; j < totalLevels; j++ {
-				firstLevelPrice := levelList[i].Price
-				secondLevelPrice := levelList[j].Price
-				if firstLevelPrice < secondLevelPrice {
-					levelList[i], levelList[j] = levelList[j], levelList[i]
-				}
-			}
-		}
-	}
+	sort.Slice(*levels, func(i, j int) bool {
+        if isAsk {
+            return (*levels)[i].Price < (*levels)[j].Price
+        }
+        return (*levels)[i].Price > (*levels)[j].Price
+    })
+
 }
 
 func mergeVirtualLevels(levels []VirtualLevel) []VirtualLevel {
@@ -579,9 +555,9 @@ func runTestCase(input string) {
 	graph := buildGraph(pairs)
 	fmt.Printf("Building virtual orderbook for %s/%s...\n", baseCurrency, quoteCurrency)
 	virtualOrderbook := buildVirtualOrderbook(graph, baseCurrency, quoteCurrency)
-	// fmt.Println("=== Virtual Orderbook ===")
-	// printVirtualOrderbook(virtualOrderbook)
-	// fmt.Println("---")
+	fmt.Println("=== Virtual Orderbook ===")
+	printVirtualOrderbook(virtualOrderbook)
+	fmt.Println("---")
 
 	// Execute on virtual orderbook to find best routes
 	fmt.Printf("Executing %.0f %s on virtual orderbook...\n", amount, baseCurrency)

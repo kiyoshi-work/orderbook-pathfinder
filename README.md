@@ -22,12 +22,15 @@ This document analyzes two problems related to finding trading routes for crypto
 
 #### Combined Pairs
 ```
-X(B->Q')(askX - bidX) +++ Y(Q'->Q)(askY - bidY) ==> (B->Q)(askX * askY - bidX * bidY)
+X(B→Q'): askX@volX, bidX@volX
+Y(Q'→Q): askY@volY, bidY@volYx
+==> X+Y(B→Q): (askX×askY)@min(volX,volY), (bidX×bidY)@min(volX,volY)
 ```
 
 #### Reverse Pairs
 ```
-forward: X(B->Q)(askX - bidX) ===> reverse: X(Q->B)(1/bidX - 1/askX)
+X(B→Q): askX@volX, bidX@volX
+==> X_rev(Q→B): (1/bidX)@volX, (1/askX)@volX
 ```
 
 ## Problem 1: Infinite Depth Approach
@@ -78,38 +81,6 @@ map[string]map[string]TradingPair // ["ETH"]["USDC"]TradingPair
 - **Simplified**: Keep entire size through each hop
 - **Result**: Graph traversal with discrete convex function edge weights
 
-### Example Scenario
-
-```text
-KNC ETH 300
-3
-KNC USDT
-2
-1.1 150
-1.2 200
-2
-0.9 100
-0.8 300
-ETH USDT
-2
-360 1000
-365 500
-2
-355 800
-350 600
-KNC ETH
-2
-0.0031 400
-0.0032 100
-2
-0.0025 400
-0.0024 100
-```
-
-**Available Routes:**
-- ETH→USDT→KNC: 0.00309859 (150 volume)
-- ETH→KNC: 0.0031 (400 volume)
-
 ### Data Structures
 
 ```go
@@ -140,22 +111,39 @@ map[string]map[string]TradingPair // ["ETH"]["USDC"]TradingPair
 
 1. **Find all paths** from base to quote currency (e.g., KNC→ETH)
 2. **Generate all route candidates** with price combinations for each path:
-   - Path 1: KNC→USDT→ETH → [1.1×1/360, 1.2×1/360, 1.1×1/365, 1.2×1/365]
-   - Path 2: KNC→ETH → [0.0031, 0.0032]
-3. **Sort candidates by price** (best price first)
+   - For each path, create all possible combinations of price levels across all hops
+   - Each candidate tracks: route prices, level indices, final effective price, max volume
+3. **Sort candidates by price** (best price first - lowest for ask, highest for bid)
 4. **Apply greedy volume tracking**: for each candidate, calculate max usable volume considering remaining volumes, then deduct used volumes to prevent double-counting
-5. **Sort and merge** orders with same price
+5. **Sort and merge** orders with same effective price
 
-#### Example Virtual Orderbook
+#### Example
+
+**Input:**
 ```
-KNC ETH
-3
-0.00309859 150 (KNC→USDT→ETH)
-0.0031 200 (KNC→ETH)  
-0.0032 100 (KNC→USDT→ETH)
-2
-0.0025 400 (ETH→KNC)
-0.0024 100 (ETH→KNC)
+KNC USDT (ASK): 1@200, 1.4@400
+ETH USDT (BID): 30@10, 20@15
+=> USDT ETH (ASK): 1/30@300, 1/20@300
+```
+
+**❌ Old Logic (Incorrect - Independent Volume Calculation):**
+```
+Each route candidate calculates volume independently:
+
+1. KNC(1@200) → ETH(1/30@300) = 1/30@min(200,300) = 1/30@200
+2. KNC(1.4@400) → ETH(1/30@300) = 1.4/30@min(400,300) = 1.4/30@300
+3. KNC(1@200) → ETH(1/20@300) = 1/20@min(200,300) = 1/20@200
+4. KNC(1.4@400) → ETH(1/20@300) = 1.4/20@min(400,300) = 1.4/20@300
+==> Wrong Result:
+Problem: Same liquidity counted multiple times!
+```
+**✅ Correct Logic (Greedy Volume Tracking):**
+```
+Route Candidates (sorted by price):
+1. 1×(1/30) = 1/30@min(200,300) = 1/30@200
+2. 1.4×(1/30) = 1.4/30@min(400,300-200) = 1.4/30@100
+3. 1×(1/20) = 1/20@min(200-200,300) = 1/20@0  
+4. 1.4×(1/20) = 1.4/20@min(400-100,300) = 1.4/20@300
 ```
 
 ### Step 2: Execute on Virtual Orderbook
@@ -164,7 +152,34 @@ KNC ETH
 2. **For each level**: Execute `min(target_amount, level_amount)` and track total cost
 3. **Continue**: Move to next level until target amount is fulfilled
 
+#### Example
+
+**Final Virtual Orderbook for KNC→ETH (ASK):**
+```
+1. 1/30@200
+2. 1/20@300  
+3. 1.4/30@100
+```
+
+**Execution Logic:**
+```
+Target: 300 KNC
+
+Step 1: 1/30@200
+- Execute: min(250, 200) = 200 KNC
+- Remaining: 100 KNC
+
+Step 2: 1/20@300
+- Execute: min(100, 300) = 100 KNC  
+- Remaining: 0 KNC
+```
+
 ## Implementation Limits
 - **Reduced Complexity**: Fewer levels = faster computation and less memory usage and prevents exploring extremely long routes that are rarely optimal
 - **MAX_LEVELS_PER_PAIR = 5**: Limit number of order levels per trading pair to reduce complexity
 - **MAX_PATH_DEPTH = 5**: Limit maximum path length to prevent exponential growth in route combinations
+
+## Future Work
+
+### Real-time Orderbook Updates
+- **Challenge**: Current implementation rebuilds entire virtual orderbook when any trading pair updates
