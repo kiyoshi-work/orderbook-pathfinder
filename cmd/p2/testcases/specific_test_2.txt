@@ -41,15 +41,16 @@ KNC ETH
 0.0025 400
 0.0024 100
 
-# Test Case 2: Example extend
-KNC ETH 400
+# Test Case 3: Example extend
+KNC ETH 300
 2
 KNC USDT
 2
 1 200
 1.4 400
-1
+2
 0.9 100
+0.8 300
 ETH USDT
 1
 40 10

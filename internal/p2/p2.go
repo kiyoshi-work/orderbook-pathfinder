@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
-	"sort"
 )
 
 const MAX_LEVELS_PER_PAIR = 5
@@ -323,11 +323,11 @@ func sortCandidatesByPrice(candidates []RouteCandidate, isAsk bool) {
 // NOTE: may be just need merge
 func sortVirtualLevels(levels *[]VirtualLevel, isAsk bool) {
 	sort.Slice(*levels, func(i, j int) bool {
-        if isAsk {
-            return (*levels)[i].Price < (*levels)[j].Price
-        }
-        return (*levels)[i].Price > (*levels)[j].Price
-    })
+		if isAsk {
+			return (*levels)[i].Price < (*levels)[j].Price
+		}
+		return (*levels)[i].Price > (*levels)[j].Price
+	})
 
 }
 
@@ -353,16 +353,9 @@ func mergeVirtualLevels(levels []VirtualLevel) []VirtualLevel {
 	return merged
 }
 
-func executeOnVirtualOrderbook(virtualPair VirtualTradingPair, targetAmount float64) ([]VirtualLevel, []VirtualLevel) {
-	bestAskRoute := findBestRouteFromVirtualOrderbook(virtualPair.AskOrders, targetAmount, true)
-	bestBidRoute := findBestRouteFromVirtualOrderbook(virtualPair.BidOrders, targetAmount, false)
-
-	return bestAskRoute, bestBidRoute
-}
-
-func findBestRouteFromVirtualOrderbook(levels []VirtualLevel, targetAmount float64, isAsk bool) []VirtualLevel {
+func findBestRouteFromVirtualOrderbook(levels []VirtualLevel, targetAmount float64) (float64, []VirtualLevel) {
 	if len(levels) == 0 {
-		return []VirtualLevel{}
+		return math.NaN(), []VirtualLevel{}
 	}
 
 	var bestRoute []VirtualLevel
@@ -372,15 +365,6 @@ func findBestRouteFromVirtualOrderbook(levels []VirtualLevel, targetAmount float
 	var totalCost float64
 	var executedAmount float64
 
-	// fmt.Printf("=== %s Execution (Target: %.0f) ===\n",
-	// 	func() string {
-	// 		if isAsk {
-	// 			return "ASK"
-	// 		} else {
-	// 			return "BID"
-	// 		}
-	// 	}(), targetAmount)
-
 	for _, level := range levels {
 		if remainingAmount <= 0 {
 			break
@@ -389,17 +373,8 @@ func findBestRouteFromVirtualOrderbook(levels []VirtualLevel, targetAmount float
 		executed := math.Min(remainingAmount, level.Amount)
 		executedAmount += executed
 
-		if isAsk {
-			cost := executed * level.Price
-			totalCost += cost
-			// fmt.Printf("Level %d: %.8f %s at %.8f ETH (Route: %s) - Cost: %.8f ETH\n",
-			// 	i+1, executed, "KNC", level.Price, formatRoute(level.Route), cost)
-		} else {
-			received := executed * level.Price
-			totalCost += received
-			// fmt.Printf("Level %d: %.8f %s at %.8f ETH (Route: %s) - Received: %.8f ETH\n",
-			// 	i+1, executed, "KNC", level.Price, formatRoute(level.Route), received)
-		}
+		cost := executed * level.Price
+		totalCost += cost
 
 		remainingAmount -= executed
 		bestRoute = append(bestRoute, VirtualLevel{
@@ -410,19 +385,12 @@ func findBestRouteFromVirtualOrderbook(levels []VirtualLevel, targetAmount float
 		})
 	}
 
-	// // Calculate effective price if we executed some amount
-	// effectivePrice := 0.0
-	// if executedAmount > 0 && targetAmount > 0 {
-	// 	effectivePrice = totalCost / targetAmount
-	// }
-	// fmt.Printf("Total executed: %.8f, Effective price: %.8f\n", executedAmount, effectivePrice)
-	// fmt.Printf("Routes executed (%d):\n", len(bestRoute))
-	// for i, route := range bestRoute {
-	// 	fmt.Printf("  %d. %s (%.8f ETH, %.8f KNC)\n", i+1, formatRoute(route.Route), route.Price, route.Amount)
-	// }
-	// fmt.Println("---")
-
-	return bestRoute
+	effectivePrice := 0.0
+	if executedAmount > 0 && targetAmount > 0 {
+		// Note: for case amount to trade is more than all virtual orderbook
+		effectivePrice = totalCost / math.Min(executedAmount, targetAmount)
+	}
+	return effectivePrice, bestRoute
 }
 
 func printVirtualOrderbook(virtualPair VirtualTradingPair) {
@@ -442,17 +410,18 @@ func printVirtualOrderbook(virtualPair VirtualTradingPair) {
 	}
 }
 
-func printBestRouteOutput(bestBidRoute, bestAskRoute []VirtualLevel) {
+func printBestRouteOutput(bestBidRoute, bestAskRoute []VirtualLevel, askPrice, bidPrice float64) {
 	fmt.Println("=== Best Routes Found ===")
 	fmt.Println("ASK Routes:")
 	if len(bestAskRoute) > 0 {
 		for i, route := range bestAskRoute {
-			fmt.Printf("  %d. %s (Price: %.8f, Amount: %.8f %s) [Level Prices: %v]\n",
+			fmt.Printf("  %d. %s (Price: %.8f, Amount: %.8f %s) [Level Prices: %v]\n ",
 				i+1, formatRoute(route.Route), route.Price, route.Amount, route.Route[len(route.Route)-1], route.LevelPrices)
 		}
 	} else {
 		fmt.Println("  NO_ROUTE")
 	}
+	fmt.Printf("ASK Price: %.8f\n", askPrice)
 	fmt.Println("BID Routes:")
 	if len(bestBidRoute) > 0 {
 		for i, route := range bestBidRoute {
@@ -462,7 +431,7 @@ func printBestRouteOutput(bestBidRoute, bestAskRoute []VirtualLevel) {
 	} else {
 		fmt.Println("  NO_ROUTE")
 	}
-
+	fmt.Printf("BID Price: %.8f\n", bidPrice)
 	fmt.Println("---")
 }
 
@@ -561,11 +530,12 @@ func runTestCase(input string) {
 
 	// Execute on virtual orderbook to find best routes
 	fmt.Printf("Executing %.0f %s on virtual orderbook...\n", amount, baseCurrency)
-	bestAskRoute, bestBidRoute := executeOnVirtualOrderbook(virtualOrderbook, amount)
+	askPrice, bestAskRoute := findBestRouteFromVirtualOrderbook(virtualOrderbook.AskOrders, amount)
+	bidPrice, bestBidRoute := findBestRouteFromVirtualOrderbook(virtualOrderbook.BidOrders, amount)
 
 	// Print results
 	fmt.Printf("Test Case: %s -> %s (Amount: %.0f)\n", baseCurrency, quoteCurrency, amount)
-	printBestRouteOutput(bestBidRoute, bestAskRoute)
+	printBestRouteOutput(bestBidRoute, bestAskRoute, askPrice, bidPrice)
 	fmt.Println("---")
 }
 

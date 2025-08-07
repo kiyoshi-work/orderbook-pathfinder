@@ -121,19 +121,36 @@ map[string]map[string]TradingPair // ["ETH"]["USDC"]TradingPair
 
 **Input:**
 ```
-KNC USDT (ASK): 1@200, 1.4@400
-ETH USDT (BID): 30@10, 20@15
-=> USDT ETH (ASK): 1/30@300, 1/20@300
+KNC ETH 300
+2
+KNC USDT
+2
+1 200
+1.4 400
+2
+0.9 100
+0.8 300
+ETH USDT
+1
+40 10
+2
+30 10
+20 15
+
+-->
+KNC/USDT (ASK): 1@200, 1.4@400
+ETH/USDT (BID): 30@10, 20@15
+=> USDT/ETH (ASK): 1/30@300, 1/20@300
 ```
 
 **❌ Old Logic (Incorrect - Independent Volume Calculation):**
 ```
 Each route candidate calculates volume independently:
 
-1. KNC(1@200) → ETH(1/30@300) = 1/30@min(200,300) = 1/30@200
-2. KNC(1.4@400) → ETH(1/30@300) = 1.4/30@min(400,300) = 1.4/30@300
-3. KNC(1@200) → ETH(1/20@300) = 1/20@min(200,300) = 1/20@200
-4. KNC(1.4@400) → ETH(1/20@300) = 1.4/20@min(400,300) = 1.4/20@300
+1. KNC/USDT(1@200) → USDT/ETH(1/30@300) = 1/30@min(200,300) = 1/30@200
+2. KNC/USDT(1.4@400) → USDT/ETH(1/30@300) = 1.4/30@min(400,300) = 1.4/30@300
+3. KNC/USDT(1@200) → USDT/ETH(1/20@300) = 1/20@min(200,300) = 1/20@200
+4. KNC/USDT(1.4@400) → USDT/ETH(1/20@300) = 1.4/20@min(400,300) = 1.4/20@300
 ==> Wrong Result:
 Problem: Same liquidity counted multiple times!
 ```
@@ -156,9 +173,9 @@ Route Candidates (sorted by price):
 
 **Final Virtual Orderbook for KNC→ETH (ASK):**
 ```
-1. 1/30@200
-2. 1/20@300  
-3. 1.4/30@100
+1. 1/30@200 (KNC/USDT(1@200) → USDT/ETH(1/30@300))
+2. 1.4/30@100 (KNC/USDT(1.4@400) → USDT/ETH(1/30@300))
+3. 1.4/20@300 ((1.4@400) → USDT/ETH(1/20@300))
 ```
 
 **Execution Logic:**
@@ -166,12 +183,16 @@ Route Candidates (sorted by price):
 Target: 300 KNC
 
 Step 1: 1/30@200
-- Execute: min(250, 200) = 200 KNC
+- Execute: min(300, 200) = 200 KNC
+- TotalCost = 200/30
 - Remaining: 100 KNC
 
-Step 2: 1/20@300
+Step 2: 1.4/30@100
 - Execute: min(100, 300) = 100 KNC  
+- TotalCost = 100*1.4/30
 - Remaining: 0 KNC
+==> Total Cost = 34/3... ETH
+==> Price: KNC/ETH: 34/900 with 2 route KNC/USDT(1@200) → USDT/ETH(1/30@300) & KNC/USDT(1.4@400) → USDT/ETH(1/30@300)
 ```
 
 ## Implementation Limits
