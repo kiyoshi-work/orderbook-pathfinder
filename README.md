@@ -226,18 +226,19 @@ Step 2: 1.4/30@100
      - Correctness: ensure sequencer & idempotency, data gap -> snapshot + replay mechanism 
      - Performance: need to process stream real-time data with low latency (Network tuning + batching + parallel processing)
      - Resilience: retry with backoff when connection errors, handle rate limits
+
 2. **OrderBook Aggregator**
    - Responsibilities:
      - Aggregate + snapshot orderbooks from different exchanges with tick
      - Build graph + keep in-memory
-     - Build & cache ** virtual orderbook ** with all pair support (can be update by interval)
+     - Build & cache **virtual orderbook** with all pair support (can be update by interval)
      - Fan-out orderbook for downstream
    - Criteria:
-     - Scalability and availability: Build virtual orderbook is computationally intensive -> bottleneck -> sharded by trading pairs
+     - Scalability and availability: Build virtual orderbook is computationally intensive -> bottleneck -> **sharded by trading pairs**
   
 3. **Routing Engine**
    - Responsibilities:
-     - Write function to calculate optimal routes with depth for each request (pair, amount, side) by function findBestRouteFromVirtualOrderbook
+     - Write function to calculate optimal routes with depth for each request (pair, amount, side) by function **findBestRouteFromVirtualOrderbook**
      - Handle route validation and constraints
    - Criteria:
      - Scalablity: 
