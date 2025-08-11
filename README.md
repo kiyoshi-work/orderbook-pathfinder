@@ -204,3 +204,52 @@ Step 2: 1.4/30@100
 
 ### Real-time Orderbook Updates
 - **Challenge**: Current implementation rebuilds entire virtual orderbook when any trading pair updates
+
+
+
+# Problem 3
+## High‑Level Architecture
+**Data flow (hot path)**
+
+```
+[Exchanges WS/REST]
+       ↓
+[Connectors/Normalizer] → [OrderBook Aggregator (in‑mem)] → (stream bus - optional)
+                                              ↘
+                                            [Routing Engine] ↔ [API]
+```
+**Components**
+1. **Exchange Connectors**
+   - WS streaming (depth/trades with snapshot + delta updates) & normalize + validate tick/price, pair symbol format
+   - Each exchange has its own connector & normalizer
+   - Criteria: 
+     - Correctness: ensure sequencer & idempotency, data gap -> snapshot + replay mechanism 
+     - Performance: need to process stream real-time data with low latency (Network tuning + batching + parallel processing)
+     - Resilience: retry with backoff when connection errors, handle rate limits
+2. **OrderBook Aggregator**
+   - Responsibilities:
+     - Aggregate + snapshot orderbooks from different exchanges with tick
+     - Build graph + keep in-memory
+     - Build & cache virtual orderbook with all pair support (can be update by interval)
+     - Fan-out orderbook for downstream
+   - Criteria:
+     - Scalability and availability: Build virtual orderbook is computationally intensive -> bottleneck -> sharded by trading pairs supported by the system
+3. **Routing Engine**
+   - Responsibilities:
+     - Write function to calculate optimal routes with depth for each request (pair, amount, side) by function findBestRouteFromVirtualOrderbook
+     - Handle route validation and constraints (min notional, lot size, etc.)
+
+   - Criteria:
+     - Scalablity: 
+       - Horizontal scaling: stateless instances, easy to add more replicas, auto-scaling based on CPU utilization
+       - Load balancing with round-robin
+
+4. **API Gateway**
+   - Responsibilities:
+     - Handle authentication and rate limiting
+     - Validate input parameters and return structured responses
+   - Criteria:
+     - Performance: 
+       - Implement caching with TTL
+     - Scalability:
+       - Horizontal scaling with load balancer, auto-scaling based on request volume
