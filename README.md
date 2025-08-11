@@ -209,14 +209,14 @@ Step 2: 1.4/30@100
 
 # Problem 3
 ## High‑Level Architecture
-**Data flow (hot path)**
+**Architecture**
 
 ```
 [Exchanges WS/REST]
        ↓
 [Connectors/Normalizer] → [OrderBook Aggregator (in‑mem)] → (stream bus - optional)
                                               ↘
-                                            [Routing Engine] ↔ [API]
+                                            [Routing Engine] ↔ [API Gateway]
 ```
 **Components**
 1. **Exchange Connectors**
