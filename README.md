@@ -226,7 +226,6 @@ Step 2: 1.4/30@100
      - Correctness: ensure sequencer & idempotency, data gap -> snapshot + replay mechanism 
      - Performance: need to process stream real-time data with low latency (Network tuning + batching + parallel processing)
      - Resilience: retry with backoff when connection errors, handle rate limits
-
 2. **OrderBook Aggregator**
    - Responsibilities:
      - Aggregate + snapshot orderbooks from different exchanges with tick
