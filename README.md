@@ -230,16 +230,20 @@ Step 2: 1.4/30@100
 2. **OrderBook Aggregator**
    - Responsibilities:
      - Aggregate + snapshot orderbooks from different exchanges with tick
-     - Build graph + keep in-memory
-     - Build & cache **virtual orderbook** with all pair support (can be update by interval)
+     - With P1 (add volume depth -> min):
+       - Build simple rate bid/ask each pair
+       - Update min volume to redis --> thinking streaming via socket for fe handle
+     - With P2:
+       - Build graph + keep in-memory
+       - Build & cache **virtual orderbook** with all pair support (can be update by interval)
      - Fan-out orderbook for downstream
    - Criteria:
-     - Scalability and availability: Build virtual orderbook is computationally intensive -> bottleneck -> **sharded by trading pairs**
+     - Scalability and availability: Build virtual orderbook is computationally intensive -> bottleneck -> **sharded by supported pairs**, separate P1&P2 use different resource & traffic
   
 3. **Routing Engine**
    - Responsibilities:
+     - Handle route validation, constraints and decide algorithm to find path 
      - Write function to calculate optimal routes with depth for each request (pair, amount, side) by function **findBestRouteFromVirtualOrderbook**
-     - Handle route validation and constraints
    - Criteria:
      - Scalablity: 
        - Horizontal scaling: stateless instances, easy to add more replicas, auto-scaling based on CPU utilization
@@ -254,3 +258,4 @@ Step 2: 1.4/30@100
        - Implement caching with TTL
      - Scalability:
        - Horizontal scaling with load balancer, auto-scaling based on request volume
+  
